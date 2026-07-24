@@ -108,6 +108,42 @@ def joined_comment(rec: dict, topic: str, *, sep: str = " ") -> str:
     return sep.join(p for p in parts if p)
 
 
+#: The ``Name=`` value of one cofactor: everything up to the field-terminating
+#: ``;``. A COFACTOR block is structured, not prose —
+#: ``"Name=Zn(2+); Xref=ChEBI:CHEBI:29105; Evidence=...;"`` — and one block can
+#: declare several cofactors in sequence.
+_COFACTOR_NAME_RE = re.compile(r"Name=([^;]+)")
+
+
+def cofactor_names(rec: dict) -> list[str]:
+    """The cofactor names an entry declares, e.g. ``["Cu cation", "Zn(2+)"]``.
+
+    COFACTOR is the one caption-relevant comment topic whose text is a
+    structured record rather than prose, so taking it verbatim (as the other
+    topics are taken) drags ChEBI cross-references and evidence codes into what
+    should read as a cofactor list::
+
+        raw   Name=Mg(2+); Xref=ChEBI:CHEBI:18420; Evidence={ECO:...};
+        here  Mg(2+)
+
+    This matches the legacy BioM3 captions, which render ``COFACTOR: Mg(2+).``
+    — verified against all 23 COFACTOR-bearing rows of
+    ``FINAL_SH3_swissprot.csv``.
+
+    Names are collected across every COFACTOR block and every ``Name=`` within
+    a block, in source order, since an entry may bind more than one cofactor
+    (Cu/Zn superoxide dismutase declares both). ``Note=`` prose and all other
+    subfields are dropped.
+    """
+    names = []
+    for text in comment_texts(rec, "COFACTOR"):
+        for match in _COFACTOR_NAME_RE.finditer(text):
+            name = clean_text(match.group(1)).strip().rstrip(".")
+            if name:
+                names.append(name)
+    return names
+
+
 def keywords(rec: dict) -> list[str]:
     """Keyword list with ``{ECO:...}`` evidence tags stripped."""
     return [strip_evidence(k).strip() for k in rec.get("keywords", [])]

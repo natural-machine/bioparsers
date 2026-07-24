@@ -14,6 +14,15 @@ recipe or your own script::
     write_manifest(builder, "out.jsonl.manifest.json",
                    description="SH3 domain subset", output="out.jsonl",
                    record_count=n)
+
+Builders are the usual producer, but only ``name`` and ``description`` are
+read, so any stage that declares those two can be manifested the same way —
+notably a *fetch*, whose provenance (which UniProt release answered, which
+accessions came back empty) is not recoverable from its output afterwards.
+:class:`Stage` is the minimal such producer::
+
+    write_manifest(Stage("uniprot_rest_fetch", "..."), "out.jsonl.manifest.json",
+                   output="out.jsonl", record_count=n, extra={...})
 """
 
 from __future__ import annotations
@@ -72,6 +81,19 @@ def _build_string(ver: str, git: dict) -> str:
     return out
 
 
+class Stage:
+    """A minimal manifest producer for a step that is not a :class:`Builder`.
+
+    Carries just the ``name`` / ``description`` pair :func:`generate_manifest`
+    reads, so non-builder stages (a fetch, a download, a conversion) get the
+    same provenance sidecar without being forced into the builder interface.
+    """
+
+    def __init__(self, name: str, description: str):
+        self.name = name
+        self.description = description
+
+
 def generate_manifest(
     builder,
     *,
@@ -84,10 +106,12 @@ def generate_manifest(
 
     Captures auto-collected provenance — bioparsers version + git state,
     Python/platform, timestamp, and the invoking command — alongside the
-    builder's ``name`` and ``description``. *description* is an optional
-    free-text note from the caller; *output* and *record_count* describe the
-    produced file; *extra* is merged in at the top level for any extra
-    run-specific keys (e.g. the recipe's Pfam IDs).
+    producer's ``name`` and ``description``. *builder* is any object declaring
+    those two attributes: a :class:`Builder`, or a :class:`Stage` for steps
+    outside the builder framework. *description* is an optional free-text note
+    from the caller; *output* and *record_count* describe the produced file;
+    *extra* is merged in at the top level for any extra run-specific keys
+    (e.g. the recipe's Pfam IDs, or a fetch's unresolved accessions).
     """
     ver = _bioparsers_version()
     git = _git_info()

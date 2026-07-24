@@ -41,6 +41,7 @@ from typing import Iterable, Iterator
 
 from bioparsers.builders import Builder
 from bioparsers.builders.pfam import filters, helpers, run_pfam_join
+from bioparsers.builders.uniprot import helpers as uniprot_helpers
 
 
 # (caption-field label, output field key) for the UniProt-derived section, in
@@ -77,7 +78,6 @@ _SIMPLE_TOPICS = {
     "DOMAIN": "domain",
     "PATHWAY": "pathway",
     "SUBUNIT": "subunit",
-    "COFACTOR": "cofactor",
     "SIMILARITY": "similarity",
     "BIOPHYSICOCHEMICAL PROPERTIES": "biophysicochemical_properties",
     "TISSUE SPECIFICITY": "tissue_specificity",
@@ -283,6 +283,10 @@ def extract_fields(rec) -> dict:
     if reactions:
         fields["catalytic_activity"] = reactions
 
+    cofactors = uniprot_helpers.cofactor_names(rec)
+    if cofactors:
+        fields["cofactor"] = cofactors
+
     sublocs = []
     for text in _all_comments(rec, "SUBCELLULAR LOCATION"):
         body = _ISOFORM_RE.sub("", _strip_evidence(text).split("Note=")[0])
@@ -307,7 +311,7 @@ def _field_text(key, value) -> str:
     """Render a field value to its bare, concatenated caption text — no
     ``LABEL:`` prefix and (unlike the legacy caption) no ``lineage`` preamble.
     """
-    if key in ("lineage", "gene_ontology"):
+    if key in ("lineage", "gene_ontology", "cofactor"):
         return ", ".join(value)
     if isinstance(value, list):
         return " ".join(value)        # join all blocks of a CC topic

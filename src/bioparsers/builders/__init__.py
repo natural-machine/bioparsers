@@ -50,7 +50,7 @@ from bioparsers.builders.io import (
     materialize,
     write_jsonl,
 )
-from bioparsers.builders.manifest import generate_manifest, write_manifest
+from bioparsers.builders.manifest import Stage, generate_manifest, write_manifest
 
 __all__ = [
     "Builder",
@@ -61,6 +61,7 @@ __all__ = [
     "materialize",
     "concatenate",
     "ConcatenatedDataset",
+    "Stage",
     "generate_manifest",
     "write_manifest",
 ]

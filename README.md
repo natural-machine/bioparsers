@@ -5,10 +5,12 @@ faithful, typed Python records.
 
 ## Description
 
-`bioparsers` has two layers:
+`bioparsers` has three layers:
 
 - **`parsers`** — Processes raw database inputs and produces iterables
   of structured records.
+- **`fetch`** — retrieves specific entries by identifier over the network,
+  yielding the same records as the corresponding parser.
 - **`builders`** — a composition layer that produces curated datasets 
   from the parsed records.
 
@@ -17,9 +19,11 @@ Implemented:
 | Database | Module | Record |
 |---|---|---|
 | UniProtKB Swiss-Prot / TrEMBL `.dat` | `bioparsers.parsers.uniprot_dat` | `UniProtRecord` |
+| UniProtKB FASTA (`sp\|...` / `tr\|...` headers) | `bioparsers.parsers.uniprot_fasta` | `UniProtFastaRecord` |
 | Pfam-A Stockholm (`Pfam-A.full`) | `bioparsers.parsers.pfam_stockholm` | `PfamRecord` |
 | Pfam-A member FASTA (`Pfam-A.fasta`) | `bioparsers.parsers.pfam_fasta` | `PfamFastaRecord` |
 | Delimited table (CSV / TSV) | `bioparsers.parsers.csv_table` | `CsvRecord` |
+| UniProtKB REST (by accession) | `bioparsers.fetch.uniprot_rest` | `UniProtRecord` |
 
 ## Setup
 
@@ -60,6 +64,12 @@ or through the `bioparsers` console script. Each parser exposes
   redundancy-reduced member set); yields one **`PfamFastaRecord`** per member
   sequence: member accession + name, aligned region, its Pfam family, and the
   ungapped residues.
+- **`uniprot_fasta`** — consumes UniProtKB FASTA, or anything derived from it
+  that kept the headers (BLAST/HMMER hit sets, alignment exports); yields one
+  **`UniProtFastaRecord`** per entry: `sp`/`tr` section, accession, entry name,
+  protein name, organism + taxon, gene, PE/SV, and the sequence. Since the
+  header carries the accession, such a file is enough to recover full
+  annotation — see [Fetch](#fetch).
 
 #### Command line
 
@@ -72,6 +82,7 @@ bioparsers uniprot uniprot_sprot.dat.gz > out.jsonl
 bioparsers uniprot in.dat -o out.jsonl
 bioparsers uniprot in.dat.gz --gzip -o out.jsonl.gz   # compress output
 bioparsers uniprot in.dat.gz --progress > out.jsonl   # heartbeat to stderr
+bioparsers uniprot-fasta hits.fasta > hits.jsonl      # UniProt FASTA headers
 ```
 
 Pass `--gzip` (`-z`) to compress the output, and `--progress [N]` for a
@@ -153,6 +164,58 @@ for row in csv_table.iter_records("SH3_supplement_data.csv"):
     print(row["primary_Accession"], row["protein_name"], row["sh3_paralog_name"])
 ```
 
+### Fetch
+
+`bioparsers.fetch` is the complement to `parsers`: where a parser reads a local
+distribution file top to bottom, a **fetcher** pulls the specific entries named
+by a list of identifiers. Both yield the same `Record` types, so nothing
+downstream can tell which was used.
+
+Reach for a fetcher when the wanted subset is small relative to the
+distribution file. Retrieving a few thousand TrEMBL entries over the REST API
+takes seconds; finding them by scanning the 160 GB local `uniprot_trembl.dat.gz`
+takes hours. The trade is currency and reachability — the API serves whatever
+UniProt currently publishes, so a fetch is not pinned to a frozen snapshot.
+
+`uniprot_rest` batches accessions (100 per request, the endpoint maximum) and
+asks for `format=txt`, which **is** the `.dat` flat-file format — so the payload
+goes straight to the `uniprot_dat` parser and the records are ordinary
+`UniProtRecord`s. Swiss-Prot and TrEMBL accessions may be mixed.
+
+```python
+from bioparsers.fetch.uniprot_rest import iter_records
+from bioparsers.parsers import dump_jsonl
+
+with open("out.jsonl", "w") as f:
+    dump_jsonl(iter_records(["P00441", "A0A072PZ83"]), f)
+```
+
+Because the payload is the `.dat` format, it is worth keeping. `raw_sink` tees
+each batch to disk as it arrives; the concatenation is a valid flat file that
+reparses offline to the same records, so a later parser fix costs a reparse
+rather than a refetch:
+
+```python
+with open("entries.dat", "w") as raw, open("out.jsonl", "w") as out:
+    dump_jsonl(iter_records(accessions, raw_sink=raw.write), out)
+```
+
+Accessions that yield no record are reported, never silently dropped, through
+two callbacks that distinguish the causes: `on_invalid` (not a valid UniProt
+accession — excluded client-side, since one malformed id makes the API reject
+its whole batch of 100) and `on_missing` (well-formed but unknown — deleted, or
+never assigned). `on_release` reports which UniProt release answered.
+
+[`recipes/fetch_uniprot_annotations.py`](recipes/fetch_uniprot_annotations.py)
+wires this together: FASTA in, annotated JSONL out, with `--save-flat` for the
+archival flat file, `--summary` for per-field annotation coverage, and a
+manifest sidecar recording the release and every unresolved accession.
+
+```bash
+python recipes/fetch_uniprot_annotations.py hits.fasta \
+    -o outputs/annotations.jsonl --save-flat outputs/entries.dat.gz --summary
+```
+
 ### Builders
 
 `bioparsers.builders` is a framework for turning parsed JSONL into
@@ -198,6 +261,18 @@ from bioparsers.builders import write_manifest
 write_manifest(SwissProtFunction(), "outputs/sprot_function.jsonl.manifest.json",
                output="outputs/sprot_function.jsonl", record_count=n,
                description="flat sequence/function pairs")
+```
+
+Only `name` and `description` are read, so any step declaring those two can be
+manifested the same way. `Stage` is the minimal such producer — used by the
+fetch recipe, whose provenance (which UniProt release answered, which
+accessions came back empty) is not recoverable from its output afterwards:
+
+```python
+from bioparsers.builders import Stage, write_manifest
+write_manifest(Stage("uniprot_rest_fetch", "Entries retrieved by accession."),
+               "outputs/annotations.jsonl.manifest.json", record_count=n,
+               extra={"unresolved": {"invalid_format": [], "not_returned": []}})
 ```
 
 The [`recipes/`](recipes/) scripts are runnable, worked examples — each defines

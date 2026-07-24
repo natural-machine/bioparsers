@@ -69,11 +69,10 @@ SPEC = [
 ]
 
 # CC topics collected verbatim — every block of the topic, evidence-stripped,
-# stored as a list. (CATALYTIC ACTIVITY and SUBCELLULAR LOCATION get special
-# per-block handling below.)
+# stored as a list. (CATALYTIC ACTIVITY, SUBCELLULAR LOCATION and COFACTOR are
+# structured rather than prose, and get special per-block handling below.)
 _SIMPLE_TOPICS = {
     "FUNCTION": "function",
-    "COFACTOR": "cofactor",
     "ACTIVITY REGULATION": "activity_regulation",
     "BIOPHYSICOCHEMICAL PROPERTIES": "biophysicochemical_properties",
     "PATHWAY": "pathway",
@@ -277,6 +276,10 @@ def extract_fields(rec) -> dict:
     if reactions:
         fields["catalytic_activity"] = reactions
 
+    cofactors = helpers.cofactor_names(rec)
+    if cofactors:
+        fields["cofactor"] = cofactors
+
     sublocs = []
     for text in _all_comments(rec, "SUBCELLULAR LOCATION"):
         body = _ISOFORM_RE.sub("", _strip_evidence(text).split("Note=")[0])
@@ -301,7 +304,7 @@ def _field_text(key, value) -> str:
     """Render a field value to its bare, concatenated caption text — no
     ``LABEL:`` prefix and (unlike the legacy caption) no ``lineage`` preamble.
     """
-    if key in ("lineage", "gene_ontology"):
+    if key in ("lineage", "gene_ontology", "cofactor"):
         return ", ".join(value)
     if isinstance(value, list):
         return " ".join(value)        # join all blocks of a CC topic

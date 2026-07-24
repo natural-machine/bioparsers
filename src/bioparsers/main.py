@@ -9,6 +9,7 @@ rather than producing a silently short result.
 
     bioparsers uniprot uniprot_sprot.dat.gz > out.jsonl
     bioparsers uniprot in.dat -o out.jsonl
+    bioparsers uniprot-fasta hits.fasta > hits.jsonl
     bioparsers pfam Pfam-A.full.gz -o pfam.jsonl
     bioparsers pfam-fasta Pfam-A.fasta.gz --pfam-id PF00018 > sh3_members.jsonl
     bioparsers csv SH3_supplement_data.csv > supplement.jsonl
@@ -32,11 +33,13 @@ from typing import Callable, Iterator
 
 from bioparsers.parsers import ParseError, Record, dump_jsonl, dump_jsonl_split
 from bioparsers.parsers import csv_table, pfam_fasta, pfam_stockholm, uniprot_dat
+from bioparsers.parsers import uniprot_fasta
 
 #: Subcommand name -> ``iter_records`` callable for that database. Adding a
 #: parser is one entry here; the subcommand and its arguments are generated.
 _PARSERS: dict[str, Callable[[str], Iterator[Record]]] = {
     "uniprot": uniprot_dat.iter_records,
+    "uniprot-fasta": uniprot_fasta.iter_records,
     "pfam": pfam_stockholm.iter_records,
     "pfam-fasta": pfam_fasta.iter_records,
     "csv": csv_table.iter_records,

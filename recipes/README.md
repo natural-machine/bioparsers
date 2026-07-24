@@ -23,8 +23,47 @@ opposed to TrEMBL.)
 | `build_supplement_caption_fields.py` | `supplement_caption_fields` | `{accession, sequence, pfam_ids, fields, caption_fields}` — raw fields + bare caption-ready text (no assembled caption) |
 | `build_legacy_dataset.py` | `legacy_sh3_dataset` | a 4-column **CSV** (`primary_Accession, protein_sequence, [final]text_caption, pfam_label`) concatenating the three section outputs in legacy order |
 | `concatenate_datasets.py` | `concatenated_dataset` | concatenate any number of labeled `NAME=PATH` JSONL[.gz] sources into one JSONL, each record tagged with a root `source` |
+| `fetch_uniprot_annotations.py` | *(fetch stage)* | one parsed `UniProtRecord` per line, retrieved by accession from the UniProt REST API — the accessions read from a UniProt-style FASTA |
 
 Optional text fields are omitted when the source entry has no value.
+
+## Getting annotation for a FASTA (the fetch recipe)
+
+`fetch_uniprot_annotations.py` is the odd one out: it *produces* parsed
+records rather than consuming them, and is the entry point when you have
+sequences but no annotation — a jackhmmer/hmmsearch hit set, an alignment
+export, any FASTA that kept its UniProt headers. It reads the accessions out of
+the headers, retrieves each entry, and writes the same JSONL a local
+`bioparsers uniprot` parse would.
+
+```bash
+python recipes/fetch_uniprot_annotations.py data/sod1s_final.fasta \
+    -o outputs/sod1s_final_annotations.jsonl \
+    --save-flat outputs/sod1s_final.dat.gz --summary
+```
+
+Its output feeds the builder recipes directly — it is parsed UniProt JSONL:
+
+```bash
+python recipes/build_swissprot_legacy_by_pfam.py \
+    outputs/sod1s_final_annotations.jsonl \
+    --pfam-ids PF00080 --pfam-names data/pfam_names.tsv \
+    --include-unreviewed --join -o outputs/sod1s_final_legacy.jsonl
+```
+
+Prefer `--save-flat` for anything you keep: it stores the raw flat file the API
+served, which reparses offline (`bioparsers uniprot <path>`) to identical
+records — so a parser fix costs a reparse, not a refetch. The manifest records
+which UniProt release answered and every accession that yielded no record,
+split into `invalid_format` and `not_returned`; neither is recoverable from the
+JSONL alone.
+
+Note `--include-unreviewed` above. The Swiss-Prot recipes are reviewed-only by
+default, matching the legacy dataset's Swiss-Prot section; a fetched hit set is
+usually mostly TrEMBL, so it needs the opt-in. Field extraction is identical for
+both sections (`PROTEIN NAME` falls back to `SubName`), but TrEMBL annotation is
+automatic rather than curated — `--summary` reports per-field coverage split by
+section so the difference is visible up front rather than discovered later.
 
 ## The supplement recipe
 
@@ -41,6 +80,30 @@ python recipes/build_supplement_legacy.py data/supplement.jsonl \
 
 Because the supplement table is its own source (no external release to drift
 against), this reproduces the section's captions exactly.
+
+## A deliberate deviation from legacy: COFACTOR
+
+COFACTOR is the one caption-relevant CC topic whose text is a **structured
+record** rather than prose:
+
+```
+Name=Mg(2+); Xref=ChEBI:CHEBI:18420; Evidence={ECO:...};
+```
+
+The four caption recipes take it via `helpers.cofactor_names()`, which keeps
+only the `Name=` values and drops the ChEBI cross-reference, evidence codes and
+`Note=` prose — matching legacy, which renders `COFACTOR: Mg(2+).` (verified
+against all 23 COFACTOR-bearing rows of `FINAL_SH3_swissprot.csv`). Taking the
+block verbatim, as the prose topics are taken, dragged the whole structured
+record into the caption.
+
+Where an entry declares **several** cofactors, all are kept as a list and
+comma-joined in the caption (`COFACTOR: Cu cation, Zn(2+).`). Legacy has no
+multi-cofactor row to match against — the three SH3 entries that now differ
+(`P41239`, `G5EE56`, `O45539`) each gained a second cofactor in UniProt since,
+and legacy kept only the first. This follows the same principle as DOMAIN
+NAMES: capture everything in list form and filter downstream, rather than
+bake in a first-only truncation.
 
 ## Assembling the complete legacy dataset
 

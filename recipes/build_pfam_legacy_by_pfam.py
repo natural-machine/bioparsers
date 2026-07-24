@@ -59,6 +59,7 @@ from typing import Iterable, Iterator
 
 from bioparsers.builders import Builder
 from bioparsers.builders.pfam import filters, helpers, run_pfam_join
+from bioparsers.builders.uniprot import helpers as uniprot_helpers
 
 
 # (caption label, output field key) for the UniProt-derived section, in the
@@ -94,8 +95,8 @@ SPEC = [
 _FORCED = {"protein_name", "gene_ontology", "lineage"}
 
 # CC topics collected verbatim — every block of the topic, evidence-stripped,
-# stored as a list. (CATALYTIC ACTIVITY and SUBCELLULAR LOCATION get special
-# per-block handling below.)
+# stored as a list. (CATALYTIC ACTIVITY, SUBCELLULAR LOCATION and COFACTOR are
+# structured rather than prose, and get special per-block handling below.)
 _SIMPLE_TOPICS = {
     "FUNCTION": "function",
     "ACTIVITY REGULATION": "activity_regulation",
@@ -103,7 +104,6 @@ _SIMPLE_TOPICS = {
     "DOMAIN": "domain",
     "PATHWAY": "pathway",
     "SUBUNIT": "subunit",
-    "COFACTOR": "cofactor",
     "SIMILARITY": "similarity",
     "BIOPHYSICOCHEMICAL PROPERTIES": "biophysicochemical_properties",
     "TISSUE SPECIFICITY": "tissue_specificity",
@@ -326,6 +326,10 @@ def extract_fields(rec) -> dict:
     if reactions:
         fields["catalytic_activity"] = reactions
 
+    cofactors = uniprot_helpers.cofactor_names(rec)
+    if cofactors:
+        fields["cofactor"] = cofactors
+
     sublocs = []
     for text in _all_comments(rec, "SUBCELLULAR LOCATION"):
         body = _ISOFORM_RE.sub("", _strip_evidence(text).split("Note=")[0])
@@ -352,7 +356,7 @@ def _caption_value(key, value) -> str:
         return ""
     if key == "lineage":
         return "The organism lineage is " + ", ".join(value)
-    if key == "gene_ontology":
+    if key in ("gene_ontology", "cofactor"):
         return ", ".join(value)
     if isinstance(value, list):
         return " ".join(value)        # join all blocks of a CC topic

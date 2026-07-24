@@ -67,11 +67,10 @@ SPEC = [
 ]
 
 # CC topics collected verbatim — every block of the topic, evidence-stripped,
-# stored as a list. (CATALYTIC ACTIVITY and SUBCELLULAR LOCATION get special
-# per-block handling below.)
+# stored as a list. (CATALYTIC ACTIVITY, SUBCELLULAR LOCATION and COFACTOR are
+# structured rather than prose, and get special per-block handling below.)
 _SIMPLE_TOPICS = {
     "FUNCTION": "function",
-    "COFACTOR": "cofactor",
     "ACTIVITY REGULATION": "activity_regulation",
     "BIOPHYSICOCHEMICAL PROPERTIES": "biophysicochemical_properties",
     "PATHWAY": "pathway",
@@ -181,6 +180,12 @@ def parse_args(argv=None):
                    help="two-column TSV (PF accession<TAB>family name), as written "
                         "by scripts/parse_pfam_names.sh, to fill FAMILY NAMES "
                         "(required)")
+    p.add_argument("--include-unreviewed", action="store_true",
+                   help="also build TrEMBL (Unreviewed) entries; off by default, "
+                        "since the legacy dataset's Swiss-Prot section is "
+                        "reviewed-only. Field extraction is identical for both "
+                        "sections (PROTEIN NAME falls back to SubName), but "
+                        "TrEMBL annotation is automatic rather than curated")
     p.add_argument("--min-length", type=int, default=0)
     return p.parse_args(argv)
 
@@ -201,7 +206,8 @@ def main(argv=None):
     args = parse_args(argv)
     pfam_names = _load_pfam_names(args.pfam_names)
     builder = SwissProtLegacyBuilder(min_length=args.min_length,
-                                     pfam_family_names=pfam_names)
+                                     pfam_family_names=pfam_names,
+                                     reviewed_only=not args.include_unreviewed)
     run_by_pfam(builder, args.input, args.pfam_ids, args.output,
                 join=args.join, gzip=args.gzip, description=args.description)
 
@@ -270,6 +276,10 @@ def extract_fields(rec) -> dict:
     if reactions:
         fields["catalytic_activity"] = reactions
 
+    cofactors = helpers.cofactor_names(rec)
+    if cofactors:
+        fields["cofactor"] = cofactors
+
     sublocs = []
     for text in _all_comments(rec, "SUBCELLULAR LOCATION"):
         body = _ISOFORM_RE.sub("", _strip_evidence(text).split("Note=")[0])
@@ -290,6 +300,12 @@ def _caption_value(key, value) -> str:
     """Render a field value to its caption string."""
     if key == "lineage":
         return "The organism lineage is " + ", ".join(value)
+    if key == "cofactor":
+        # Short atomic terms like lineage, not prose blocks — comma-joined so
+        # a multi-cofactor entry reads as a list ("Cu cation, Zn(2+)") rather
+        # than a run-on. Single-cofactor entries, the only kind the legacy
+        # dataset contains, render identically either way.
+        return ", ".join(value)
     if isinstance(value, list):
         return " ".join(value)        # join all blocks of a CC topic
     return value

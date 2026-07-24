@@ -122,3 +122,62 @@ class TestKeywordsAndPfam:
     def test_pfam_ids_empty_without_pfam(self):
         assert helpers.pfam_ids({"cross_references": {}}) == []
         assert helpers.pfam_ids({}) == []
+
+
+class TestCofactorNames:
+    """COFACTOR text is a structured record, not prose, so only the ``Name=``
+    values belong in a caption. Legacy BioM3 renders ``COFACTOR: Mg(2+).``;
+    taking the block verbatim would drag in ChEBI xrefs and evidence codes.
+    """
+
+    def test_extracts_name_dropping_xref_and_evidence(self):
+        rec = {"comments": [{
+            "topic": "COFACTOR",
+            "text": "Name=Mg(2+); Xref=ChEBI:CHEBI:18420; Evidence=;",
+        }]}
+        assert helpers.cofactor_names(rec) == ["Mg(2+)"]
+
+    def test_drops_note_prose(self):
+        rec = {"comments": [{
+            "topic": "COFACTOR",
+            "text": ("Name=Mg(2+); Xref=ChEBI:CHEBI:18420; Evidence=; "
+                     "Note=Mg(2+) and Mn(2+) were both present in the kinase "
+                     "buffer but Mg(2+) is likely the in vivo cofactor.;"),
+        }]}
+        assert helpers.cofactor_names(rec) == ["Mg(2+)"]
+
+    def test_multiple_names_in_one_block(self):
+        # Cu/Zn superoxide dismutase declares both metals in a single block.
+        rec = {"comments": [{
+            "topic": "COFACTOR",
+            "text": ("Name=Cu cation; Xref=ChEBI:CHEBI:23378; Evidence=; "
+                     "Note=Binds 1 copper ion per subunit.; "
+                     "Name=Zn(2+); Xref=ChEBI:CHEBI:29105; Evidence=; "
+                     "Note=Binds 1 zinc ion per subunit.;"),
+        }]}
+        assert helpers.cofactor_names(rec) == ["Cu cation", "Zn(2+)"]
+
+    def test_multiple_blocks_are_collected_in_order(self):
+        rec = {"comments": [
+            {"topic": "COFACTOR", "text": "Name=Mn(2+); Xref=ChEBI:CHEBI:29035;"},
+            {"topic": "FUNCTION", "text": "Unrelated."},
+            {"topic": "COFACTOR", "text": "Name=Ca(2+); Xref=ChEBI:CHEBI:29108;"},
+        ]}
+        assert helpers.cofactor_names(rec) == ["Mn(2+)", "Ca(2+)"]
+
+    def test_strips_evidence_tags_inside_the_name(self):
+        rec = {"comments": [{
+            "topic": "COFACTOR",
+            "text": "Name=Zn(2+) {ECO:0000256|ARBA:ARBA00001947}; Xref=ChEBI:CHEBI:29105;",
+        }]}
+        assert helpers.cofactor_names(rec) == ["Zn(2+)"]
+
+    def test_no_cofactor_comment_returns_empty(self):
+        assert helpers.cofactor_names({"comments": [
+            {"topic": "FUNCTION", "text": "Name=not a cofactor block;"},
+        ]}) == []
+        assert helpers.cofactor_names({}) == []
+
+    def test_block_without_a_name_field_returns_empty(self):
+        rec = {"comments": [{"topic": "COFACTOR", "text": "Note=Unspecified.;"}]}
+        assert helpers.cofactor_names(rec) == []

@@ -89,7 +89,7 @@ Fail-loud (raises ``ParseError``)
 from __future__ import annotations
 
 import re
-from typing import ClassVar, Iterator
+from typing import ClassVar, Iterable, Iterator
 
 from Bio.SeqUtils.CheckSum import crc64
 
@@ -139,20 +139,39 @@ def iter_records(path: str) -> Iterator[UniProtRecord]:
     """Yield one :class:`UniProtRecord` per UniProt entry in *path*.
 
     Reads through :func:`base.iter_lines` (fail-loud on a truncated
-    compressed stream), groups each ``ID`` … ``//`` block, and delegates
-    to :func:`parse_entry`. Raises ``ParseError`` if the file does not
-    start at an ``ID`` line or an entry is not ``//``-terminated at EOF.
+    compressed stream) and delegates to :func:`iter_records_from_lines`.
+    Raises ``ParseError`` if the file does not start at an ``ID`` line or
+    an entry is not ``//``-terminated at EOF.
+    """
+    yield from iter_records_from_lines(iter_lines(path), source=path)
+
+
+def iter_records_from_lines(
+    lines: Iterable[str], *, source: str = "<stream>"
+) -> Iterator[UniProtRecord]:
+    """Yield one :class:`UniProtRecord` per entry from an iterable of flat-file
+    *lines*, grouping each ``ID`` … ``//`` block and delegating to
+    :func:`parse_entry`.
+
+    The line-oriented half of :func:`iter_records`, factored out so the same
+    grammar serves text that never was a file — notably the ``format=txt``
+    payload the UniProt REST API returns, which is byte-identical to the
+    ``.dat`` format (see ``bioparsers.fetch.uniprot_rest``). *source* only
+    labels the input in error messages.
+
+    Raises ``ParseError`` if the stream does not start at an ``ID`` line or
+    ends mid-entry.
     """
     entry: list[str] = []
     seen_id = False
 
-    for line in iter_lines(path):
+    for line in lines:
         if not seen_id:
             if line.strip() == "":
                 continue
             if not line.startswith("ID   "):
                 raise ParseError(
-                    f"{path}: expected an ID line at start of entry, got {line!r}"
+                    f"{source}: expected an ID line at start of entry, got {line!r}"
                 )
             seen_id = True
 
@@ -165,7 +184,7 @@ def iter_records(path: str) -> Iterator[UniProtRecord]:
 
     if entry:
         raise ParseError(
-            f"{path}: file ended mid-entry (no closing '//') — truncated input"
+            f"{source}: input ended mid-entry (no closing '//') — truncated input"
         )
 
 
